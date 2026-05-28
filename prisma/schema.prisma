@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum ContentStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ContentType {
+  BLOG_TITLE
+  XIAOHONGSHU
+  TWITTER
+  LINKEDIN
+  EMAIL
+  AD_COPY
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum Platform {
+  TWITTER
+  LINKEDIN
+  XIAOHONGSHU
+  INSTAGRAM
+  FACEBOOK
+  WECHAT
+  EMAIL
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  passwordHash   String?
+  image          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  workspaceMembers WorkspaceMember[]
+  contents       ContentItem[]
+  comments       Comment[]
+  approvalRequests ApprovalRequest[] @relation("ApprovalRequester")
+  approvalReviews  ApprovalRequest[] @relation("ApprovalReviewer")
+  aiUsageLogs    AiUsageLog[]
+  auditLogs      AuditLog[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members        WorkspaceMember[]
+  brandProfiles  BrandProfile[]
+  contents       ContentItem[]
+  promptTemplates PromptTemplate[]
+  socialAccounts SocialAccount[]
+  aiUsageLogs    AiUsageLog[]
+  auditLogs      AuditLog[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        Role     @default(EDITOR)
+  joinedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model BrandProfile {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  name          String
+  tone          String?  @db.Text
+  targetAudience String? @db.Text
+  forbiddenWords String[] 
+  productDescription String? @db.Text
+  logoUrl       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contents  ContentItem[]
+}
+
+model ContentItem {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  brandProfileId String?
+  authorId      String
+  title         String?
+  body          String        @db.Text
+  contentType   ContentType
+  status        ContentStatus @default(DRAFT)
+  platform      Platform?
+  metadata      Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brandProfile BrandProfile?   @relation(fields: [brandProfileId], references: [id])
+  author       User            @relation(fields: [authorId], references: [id])
+  versions     ContentVersion[]
+  schedule     PublishSchedule?
+  approvals    ApprovalRequest[]
+  comments     Comment[]
+}
+
+model ContentVersion {
+  id            String   @id @default(cuid())
+  contentItemId String
+  version       Int
+  body          String   @db.Text
+  changeNote    String?
+  createdAt     DateTime @default(now())
+
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  @@unique([contentItemId, version])
+}
+
+model PromptTemplate {
+  id          String      @id @default(cuid())
+  workspaceId String?
+  name        String
+  description String?
+  contentType ContentType
+  prompt      String      @db.Text
+  isSystem    Boolean     @default(false)
+  variables   String[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model SocialAccount {
+  id          String   @id @default(cuid())
+  workspaceId String
+  platform    Platform
+  accountName String
+  accountId   String?
+  accessToken String?  @db.Text
+  refreshToken String? @db.Text
+  tokenExpiry DateTime?
+  isConnected Boolean  @default(false)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  schedules PublishSchedule[]
+}
+
+model PublishSchedule {
+  id              String        @id @default(cuid())
+  contentItemId   String        @unique
+  socialAccountId String?
+  scheduledAt     DateTime
+  publishedAt     DateTime?
+  failedAt        DateTime?
+  failReason      String?
+  createdAt       DateTime      @default(now())
+
+  contentItem   ContentItem   @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount? @relation(fields: [socialAccountId], references: [id])
+}
+
+model ApprovalRequest {
+  id            String         @id @default(cuid())
+  contentItemId String
+  requesterId   String
+  reviewerId    String?
+  status        ApprovalStatus @default(PENDING)
+  comment       String?        @db.Text
+  createdAt     DateTime       @default(now())
+  resolvedAt    DateTime?
+
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  requester   User        @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  reviewer    User?       @relation("ApprovalReviewer", fields: [reviewerId], references: [id])
+}
+
+model Comment {
+  id            String   @id @default(cuid())
+  contentItemId String
+  authorId      String
+  body          String   @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id])
+}
+
+model AiUsageLog {
+  id           String      @id @default(cuid())
+  workspaceId  String
+  userId       String
+  contentType  ContentType?
+  model        String
+  promptTokens Int
+  completionTokens Int
+  totalTokens  Int
+  cost         Float?
+  createdAt    DateTime    @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+}
